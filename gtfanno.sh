@@ -109,7 +109,7 @@ elif load_gtf | head | grep -E "GRCh38|mm10" > /dev/null; then
 	genome=mm10
 fi
 
-genome_size_url="https://raw.githubusercontent.com/igvteam/igv/master/genomes/sizes/$genome.chrom.sizes"
+genome_size_url="https://raw.githubusercontent.com/igvteam/igv/refs/heads/main/genomes/sizes/$genome.chrom.sizes"
 
 chr_file=$outdir/$prefix.chr.bed
 tss_file=$regiondir/$prefix.tss$tss_radius.bed
