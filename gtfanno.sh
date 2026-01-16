@@ -32,7 +32,8 @@ Parameters:
 	-p	Optional. Prefix to output files. Default the same as the prefix of GTF file name.
 	-o	Optional. Output directory. Default the current working directory.
 	-k	Optional. Also include scaffolds.
-	-r	Optional. The radius upstream and downstream the TSS. Default to 300.
+	-u	Optional. Upstream distance from TSS (bp). Default: 2000.
+	-d	Optional. Downstgream distance from TSS (bp). Default: 500.
 	-s	Optional. The local chromosome size file for calculating intergenic area. If left empty, it will be automatically downloaded from https://github.com/igvteam/igv/tree/maaster/genomes/sizes
 	-h	Print this help message.
 
@@ -58,16 +59,17 @@ include_scaffold=false
 outdir=$(pwd)
 tss_radius=300
 
-while getopts f:p:o:kr:s:h opt; do
+while getopts f:p:o:ku:d:s:h opt; do
 case ${opt} in
 	f) gtf_file=${OPTARG};;
 	p) prefix=${OPTARG};;
 	o) outdir=${OPTARG};;
 	k) include_scaffold=true;;
-	r) tss_radius=${OPTARG};;
+	u) up_dist=${OPTARG};;
+	d) down_dist=${OPTARG};;
 	s) size_file=${OPTARG};;
 	h) usage 0;;
-	*)
+	*) usage 1;;
 esac
 done
 
@@ -112,7 +114,7 @@ fi
 genome_size_url="https://raw.githubusercontent.com/igvteam/igv/refs/heads/main/genomes/sizes/$genome.chrom.sizes"
 
 chr_file=$outdir/$prefix.chr.bed
-tss_file=$regiondir/$prefix.tss$tss_radius.bed
+tss_file=$regiondir/$prefix.tss_u${up_dist}_d${down_dist}.bed
 exon_file=$regiondir/$prefix.exon_no_tss.bed
 intron_file=$regiondir/$prefix.intron.bed
 intergenic_file=$regiondir/$prefix.intergenic.bed
@@ -181,12 +183,16 @@ ok "Job finished"
 info "Start generate TSS $tss_radius annotation: $(warn $tss_file)"
 
 get_tss_from_chr() {
-	awk -F '\t' -v r="$tss_radius" -v OFS='\t' '{
+	awk -F '\t' -v u="$up_dist" -v d="$down_dist" -v OFS='\t' '{
 		if ($6 == "+") {
-			print $1, $2-r, $2+r, $4, $5, $6
+			s = $2 - u
+			e = $2 + d
 		} else {
-			print $1, $3-r, $3+r, $4, $5, $6
+			s = $3 - d
+			e = $3 + u
 		}
+		if (s < 0) s = 0;
+		print $1, s, e, $4, $5, $6
 	}'
 }
 
@@ -216,7 +222,7 @@ ok "Job finished."
 #													#
 #####################################################
 
-info "Start generate exon (without TSS $tss_radius) annotation: $(warn $exon_file)"
+info "Start generate exon (excluding TSS) annotation: $(warn $exon_file)"
 
 exon_tmp=$tmpdir/exon.tmp
 grep "exon" $chr_file > $exon_tmp
@@ -230,7 +236,7 @@ ok "Job finished."
 #													#
 #####################################################
 
-info "Start generate intron (without TSS $tss_radius) annotation: $(warn $intron_file)"
+info "Start generate intron (excluding TSS) annotation: $(warn $intron_file)"
 
 exon_tss_tmp=$tmpdir/exon_tss.tmp
 gene_tmp=$tmpdir/gene.tmp
@@ -256,7 +262,7 @@ intergenic_fwd_tmp=$tmpdir/intergenic_fwd.tmp
 intergenic_rev_tmp=$tmpdir/intergenic_rev.tmp
 genome_size_tmp=$tmpdir/genome_size.tmp
 
-if [[ -z $size_file ]] || [[ -f $size_file ]]; then
+if [[ -z $size_file ]] || [[ ! -f $size_file ]]; then
 	warn "Local genome size file not found. Start downloading from $genome_size_url"
 	curl $genome_size_url > $genome_size_tmp
 	ok "$genome size file is downloaded to $genome_size_tmp"
@@ -312,6 +318,8 @@ for line in sys.stdin:
 
 for k in gtf["UTR"].keys():
     for u in gtf["UTR"][k]:
+        if k not in gtf["CDS"]:
+            continue
         if gtf["CDS"][k][0][4] == "+":
             utr_type = "three_prime_utr" if int(u[2]) > max([int(c[3]) for c in gtf["CDS"][k]]) else "five_prime_utr"
         else:
@@ -331,7 +339,7 @@ grep five_prime_utr $utr_tmp > $five_utr_file
 bedtools subtract -s -a $five_utr_file -b $tss_file | sort_bed |\
 	bedtools merge -s -i stdin -c 4,6 -o distinct,distinct | awk -F '\t' -v OFS='\t' '{
 		split($4, name, ":"); 
-		print $1, $2, $3, $1":"$2"-"$3":3utr:"name[5]":"$5, "0", $5
+		print $1, $2, $3, $1":"$2"-"$3":5utr:"name[5]":"$5, "0", $5
 	}' > $five_utr_notss_file
 
 grep three_prime_utr $utr_tmp > $three_utr_file
@@ -362,10 +370,22 @@ bedtools subtract -s -a $cds_file  -b $tss_file | sort_bed |\
 
 ok "Job finished."
 
+#####################################################
+#                                                   #
+#                   8) Merge regions                #
+#                                                   #
+#####################################################
+
+merged_file=$outdir/$prefix.region.bed
+info "Start merging all region files: $(warn $merged_file)"
+
+cat $tss_file $exon_file $intron_file $intergenic_file | sort_bed > $merged_file
+
+ok "Job finished."
 
 #####################################################
 #													#
-#					8) clean						#
+#					9) clean						#
 #													#
 #####################################################
 
