@@ -57,7 +57,8 @@ check_cmd
 
 include_scaffold=false
 outdir=$(pwd)
-tss_radius=300
+up_dist=2000
+down_dist=500
 
 while getopts f:p:o:ku:d:s:h opt; do
 case ${opt} in
